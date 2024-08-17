@@ -1,0 +1,494 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PinouGLB Viewer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            margin: 0; 
+            font-family: 'Roboto', sans-serif;
+            background-color: #f0f0f0; 
+            overflow: hidden;
+        }
+        canvas { 
+            display: block; 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+        }
+        #fps { 
+            position: fixed; 
+            top: 10px; 
+            left: 10px; 
+            background: rgba(255, 255, 255, 0.899); 
+            color: #fff; 
+            padding: 10px 15px; 
+            border-radius: 5px; 
+            font-size: 14px; 
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .gui-container {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.7);
+            color: #fff;
+            padding: var(--gui-padding, 10px);
+            border-radius: var(--gui-border-radius, 8px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            z-index: 100;
+            max-width: var(--gui-width, 400px);
+            overflow-y: auto;
+            height: calc(100% - 20px);
+            font-size: var(--gui-font-size, 14px);
+        }
+        .dat-gui {
+            color: #fff;
+        }
+        .dat-gui .folder-name {
+            font-weight: bold;
+        }
+        .dat-gui .property-name {
+            color: #ddd;
+        }
+        .dat-gui .property-value {
+            color: #bbb;
+        }
+        .dat-gui .parameter {
+            font-size: var(--gui-font-size, 14px);
+        }
+        @media (max-width: 600px) {
+            .gui-container {
+                width: 90%;
+                max-width: none;
+                height: auto;
+                bottom: 10px;
+                top: auto;
+                right: 5%;
+                left: 5%;
+            }
+            #fps {
+                font-size: 12px;
+                padding: 5px 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="fps">FPS: 0</div>
+    <div class="gui-container"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dat.gui/build/dat.gui.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stats.js/build/stats.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/FilmShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/GlitchShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/DisplacementShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/DotScreenShader.js"></script>
+
+    <!-- Exemple de shader ASCII Art (vous devez ajouter le code de ce shader vous-même) -->
+    <script id="ascii-art-shader" type="x-shader/x-vertex">
+        // Vertex shader
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    </script>
+    <script id="ascii-art-shader-fragment" type="x-shader/x-fragment">
+        // Fragment shader
+        uniform sampler2D tDiffuse;
+        varying vec2 vUv;
+
+        void main() {
+            vec4 color = texture2D(tDiffuse, vUv);
+            // Appliquez un effet ASCII Art ici
+            gl_FragColor = color;
+        }
+    </script>
+
+    <script id="psychedelic-shader" type="x-shader/x-vertex">
+        // Vertex shader
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    </script>
+    <script id="psychedelic-shader-fragment" type="x-shader/x-fragment">
+        // Fragment shader
+        uniform sampler2D tDiffuse;
+        varying vec2 vUv;
+
+        void main() {
+            vec4 color = texture2D(tDiffuse, vUv);
+            // Appliquez un effet psychédélique ici
+            float r = sin(color.r * 10.0);
+            float g = sin(color.g * 10.0);
+            float b = sin(color.b * 10.0);
+            gl_FragColor = vec4(r, g, b, color.a);
+        }
+    </script>
+
+    <script>
+        // Initialisation de la scène, de la caméra et du rendu
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0xffffff);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // Initialisation du FPS
+        const stats = new Stats();
+        document.body.appendChild(stats.dom);
+
+        // Ajout des contrôles de la souris
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+        // Ajout d'une lumière directionnelle
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(5, 5, 5);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        scene.add(directionalLight);
+
+        // Ajout d'une lumière ambiante
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        // Chargement du modèle glTF
+        const loader = new THREE.GLTFLoader();
+        loader.load('modeles3d.glb', function (gltf) {
+            gltf.scene.traverse(function (node) {
+                if (node.isMesh) {
+                    node.castShadow = true;
+                    node.receiveShadow = true;
+                }
+            });
+            scene.add(gltf.scene);
+            renderer.render(scene, camera);
+        }, undefined, function (error) {
+            console.error('Une erreur est survenue lors du chargement du modèle :', error);
+        });
+
+        // Création du skydome
+        const skyGeo = new THREE.SphereGeometry(5000, 32, 32);
+        const skyTexture = new THREE.TextureLoader().load
+
+('skybox.png');
+        const skyMaterial = new THREE.MeshBasicMaterial({
+            map: skyTexture,
+            side: THREE.BackSide
+        });
+        const sky = new THREE.Mesh(skyGeo, skyMaterial);
+        scene.add(sky);
+
+        // Création de l'effet de post-traitement
+        const composer = new THREE.EffectComposer(renderer);
+        const renderPass = new THREE.RenderPass(scene, camera);
+        composer.addPass(renderPass);
+
+        const copyPass = new THREE.ShaderPass(THREE.CopyShader);
+        copyPass.renderToScreen = true;
+        composer.addPass(copyPass);
+
+        // Ajouter les effets de post-traitement
+        const filmPass = new THREE.ShaderPass(THREE.FilmShader);
+        filmPass.enabled = false;
+        composer.addPass(filmPass);
+
+        const glitchPass = new THREE.ShaderPass(THREE.GlitchShader);
+        glitchPass.enabled = false;
+        composer.addPass(glitchPass);
+
+        const displacementPass = new THREE.ShaderPass(THREE.DisplacementShader);
+        displacementPass.enabled = false;
+        composer.addPass(displacementPass);
+
+        const dotScreenPass = new THREE.ShaderPass(THREE.DotScreenShader);
+        dotScreenPass.enabled = false;
+        composer.addPass(dotScreenPass);
+
+        // Ajouter les shaders personnalisés
+        const asciiArtPass = new THREE.ShaderPass({
+            vertexShader: document.getElementById('ascii-art-shader').textContent,
+            fragmentShader: document.getElementById('ascii-art-shader-fragment').textContent
+        });
+        asciiArtPass.enabled = false;
+        composer.addPass(asciiArtPass);
+
+        const psychedelicPass = new THREE.ShaderPass({
+            vertexShader: document.getElementById('psychedelic-shader').textContent,
+            fragmentShader: document.getElementById('psychedelic-shader-fragment').textContent
+        });
+        psychedelicPass.enabled = false;
+        composer.addPass(psychedelicPass);
+
+        // Fonction pour mettre à jour les coordonnées dans l'URL
+        function updateURL() {
+            const { x, y, z } = camera.position;
+            const url = new URL(window.location);
+            url.searchParams.set('x', x.toFixed(2));
+            url.searchParams.set('y', y.toFixed(2));
+            url.searchParams.set('z', z.toFixed(2));
+            url.searchParams.set('far', camera.far);
+            url.searchParams.set('fov', camera.fov); // Ajoutez cette ligne pour le FOV
+            url.searchParams.set('shadowEnabled', renderer.shadowMap.enabled);
+            url.searchParams.set('shadowType', renderer.shadowMap.type);
+            url.searchParams.set('guiWidth', getComputedStyle(document.documentElement).getPropertyValue('--gui-width').trim());
+            url.searchParams.set('guiPadding', getComputedStyle(document.documentElement).getPropertyValue('--gui-padding').trim());
+            url.searchParams.set('guiBorderRadius', getComputedStyle(document.documentElement).getPropertyValue('--gui-border-radius').trim());
+            url.searchParams.set('guiFontSize', getComputedStyle(document.documentElement).getPropertyValue('--gui-font-size').trim());
+            url.searchParams.set('filmEnabled', filmPass.enabled);
+            url.searchParams.set('glitchEnabled', glitchPass.enabled);
+            url.searchParams.set('displacementEnabled', displacementPass.enabled);
+            url.searchParams.set('dotScreenEnabled', dotScreenPass.enabled);
+            url.searchParams.set('asciiArtEnabled', asciiArtPass.enabled);
+            url.searchParams.set('psychedelicEnabled', psychedelicPass.enabled);
+            window.history.replaceState({}, '', url);
+        }
+
+        // Fonction pour téléporter la caméra en utilisant les coordonnées de l'URL
+        function teleportFromURL() {
+            const url = new URL(window.location);
+            const x = parseFloat(url.searchParams.get('x')) || 0;
+            const y = parseFloat(url.searchParams.get('y')) || 0;
+            const z = parseFloat(url.searchParams.get('z')) || 5;
+            camera.position.set(x, y, z);
+            camera.far = parseFloat(url.searchParams.get('far')) || 1000;
+            camera.fov = parseFloat(url.searchParams.get('fov')) || 75; // Ajoutez cette ligne pour le FOV
+            camera.updateProjectionMatrix();
+            renderer.shadowMap.enabled = url.searchParams.get('shadowEnabled') === 'true';
+            renderer.shadowMap.type = parseInt(url.searchParams.get('shadowType')) || THREE.PCFSoftShadowMap;
+            document.documentElement.style.setProperty('--gui-width', url.searchParams.get('guiWidth') || '400px');
+            document.documentElement.style.setProperty('--gui-padding', url.searchParams.get('guiPadding') || '10px');
+            document.documentElement.style.setProperty('--gui-border-radius', url.searchParams.get('guiBorderRadius') || '8px');
+            document.documentElement.style.setProperty('--gui-font-size', url.searchParams.get('guiFontSize') || '14px');
+            filmPass.enabled = url.searchParams.get('filmEnabled') === 'true';
+            glitchPass.enabled = url.searchParams.get('glitchEnabled') === 'true';
+            displacementPass.enabled = url.searchParams.get('displacementEnabled') === 'true';
+            dotScreenPass.enabled = url.searchParams.get('dotScreenEnabled') === 'true';
+            asciiArtPass.enabled = url.searchParams.get('asciiArtEnabled') === 'true';
+            psychedelicPass.enabled = url.searchParams.get('psychedelicEnabled') === 'true';
+        }
+
+        // Appel de la fonction de téléportation au chargement de la page
+        teleportFromURL();
+
+        // Ajout des contrôles de clavier pour ZQSD et AE
+        document.addEventListener('keydown', function(event) {
+            const speed = 1;
+            switch(event.key) {
+                case 'z':
+                    camera.position.z -= speed;
+                    break;
+                case 's':
+                    camera.position.z += speed;
+                    break;
+                case 'q':
+                    camera.position.x -= speed;
+                    break;
+                case 'd':
+                    camera.position.x += speed;
+                    break;
+                case 'a':
+                    camera.position.y += speed;
+                    break;
+                case 'e':
+                    camera.position.y -= speed;
+                    break;
+            }
+            updateURL(); // Met à jour l'URL à chaque déplacement
+        });
+
+        // Interface utilisateur pour ajuster les paramètres
+        const gui = new dat.GUI({ autoPlace: false });
+        document.querySelector('.gui-container').appendChild(gui.domElement);
+
+        // Ajout des paramètres de la caméra
+        const cameraFolder = gui.addFolder('Camera');
+        cameraFolder.add(camera.position, 'x', -100, 100).name('Position X').onChange(updateURL);
+        cameraFolder.add(camera.position, 'y', -100, 100).name('Position Y').onChange(updateURL);
+        cameraFolder.add(camera.position, 'z', -100, 100).name('Position Z').onChange(updateURL);
+        cameraFolder.add(camera, 'near', 0.1, 500).name('Near Clipping Plane').onChange(updateCameraClipping);
+        cameraFolder.add(camera, 'far', 300, 10000).name('Far Clipping Plane').onChange(updateCameraClipping);
+        cameraFolder.open();
+
+        cameraFolder.add(camera, 'fov', 1, 175).name('Field of View').onChange(function(value) {
+            camera.fov = value;
+            camera.updateProjectionMatrix();
+            updateURL();
+        });
+
+
+        const lightFolder = gui.addFolder('Lights');
+        lightFolder.add(directionalLight.position, 'x', -100, 100).name('Light X').onChange(updateURL);
+        lightFolder.add(directionalLight.position, 'y', -100, 100).name('Light Y').onChange(updateURL);
+        lightFolder.add(directionalLight.position, 'z', -100, 100).name('Light Z').onChange(updateURL);
+        lightFolder.add(directionalLight, 'intensity', -5, 5).name('Intensity').onChange(updateURL);
+        lightFolder.open();
+
+        // Ajout des paramètres pour l'heure de la journée
+        const timeFolder = gui.addFolder('Time of Day');
+        const timeParams = { time: 12 };
+        timeFolder.add(timeParams, 'time', -1, 25).name('Time').onChange(updateLighting);
+        timeFolder.open();
+
+        // Ajout des paramètres de graphisme
+        const graphicsFolder = gui.addFolder('Graphics');
+        graphicsFolder.add(renderer.shadowMap, 'enabled').name('Shadows Enabled').onChange(function(value) {
+            renderer.shadowMap.enabled = value;
+            updateURL();
+        });
+        graphicsFolder.add(renderer.shadowMap, 'type', {
+            'Basic': THREE.BasicShadowMap,
+            'PCF': THREE.PCFShadowMap,
+            'PCFSoft': THREE.PCFSoftShadowMap
+        }).name('Shadow Type').onChange(function(value) {
+            renderer.shadowMap.type = parseInt(value);
+            updateURL();
+        });
+        graphicsFolder.open();
+
+        // Paramètres de personnalisation de l'interface
+        const customizationFolder = gui.addFolder('Customization');
+        const customParams = {
+            'Width': 400,
+            'Padding': 10,
+            'Border Radius': 8,
+            'Font Size': 14
+        };
+        customizationFolder.add(customParams, 'Width', 200, 800).onChange(function(width) {
+            document.documentElement.style.setProperty('--gui-width', `${width}px`);
+            updateURL();
+        });
+        customizationFolder.add(customParams, 'Padding', 5, 30).onChange(function(padding) {
+            document.documentElement.style.setProperty('--gui-padding', `${padding}px`);
+            updateURL();
+        });
+        customizationFolder.add(customParams, 'Border Radius', 0, 30).onChange(function(radius) {
+            document.documentElement.style.setProperty('--gui-border-radius', `${radius}px`);
+            updateURL();
+        });
+        customizationFolder.add(customParams, 'Font Size', 10, 30).onChange(function(size) {
+            document.documentElement.style.setProperty('--gui-font-size', `${
+
+size}px`);
+            updateURL();
+        });
+        customizationFolder.open();
+
+        // Paramètres de filtres
+        const effectsFolder = gui.addFolder('Effects');
+        effectsFolder.add(filmPass, 'enabled').name('Film Effect').onChange(function(value) {
+            filmPass.enabled = value;
+            updateURL();
+        });
+        effectsFolder.add(glitchPass, 'enabled').name('Glitch Effect').onChange(function(value) {
+            glitchPass.enabled = value;
+            updateURL();
+        });
+        effectsFolder.add(displacementPass, 'enabled').name('Displacement Effect').onChange(function(value) {
+            displacementPass.enabled = value;
+            updateURL();
+        });
+        effectsFolder.add(dotScreenPass, 'enabled').name('Dot Screen Effect').onChange(function(value) {
+            dotScreenPass.enabled = value;
+            updateURL();
+        });
+        effectsFolder.add(asciiArtPass, 'enabled').name('ASCII Art Effect').onChange(function(value) {
+            asciiArtPass.enabled = value;
+            updateURL();
+        });
+        effectsFolder.add(psychedelicPass, 'enabled').name('Psychedelic Effect').onChange(function(value) {
+            psychedelicPass.enabled = value;
+            updateURL();
+        });
+        effectsFolder.open();
+
+        function updateLighting(time) {
+            const intensity = Math.max(0.1, Math.sin((time / 24) * Math.PI));
+            directionalLight.intensity = intensity;
+            const color = new THREE.Color(`hsl(${(time / 24) * 360}, 100%, 50%)`);
+            directionalLight.color = color;
+        }
+
+        function updateCameraClipping() {
+            camera.updateProjectionMatrix();
+            updateURL();
+        }
+
+        // Animation de la scène
+        function animate() {
+            stats.begin();
+            
+            // Mesurer les performances
+            stats.end();
+            
+            requestAnimationFrame(animate);
+            controls.update();
+            
+            // Rendre la skybox séparément
+            composer.render();
+            
+            // Afficher les FPS
+            document.getElementById('fps').textContent = `FPS: ${Math.round(stats.getFPS())}`;
+        }
+        animate();
+    </script>
+
+    <!-- Shaders for Effects -->
+    <script id="ascii-art-shader" type="x-shader/x-vertex">
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    </script>
+    <script id="ascii-art-shader-fragment" type="x-shader/x-fragment">
+        varying vec2 vUv;
+        uniform sampler2D tDiffuse;
+        void main() {
+            vec4 color = texture2D(tDiffuse, vUv);
+            float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+            float ascii = floor(gray * 10.0) / 10.0;
+            gl_FragColor = vec4(ascii, ascii, ascii, 1.0);
+        }
+    </script>
+    
+    <script id="psychedelic-shader" type="x-shader/x-vertex">
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    </script>
+    <script id="psychedelic-shader-fragment" type="x-shader/x-fragment">
+        varying vec2 vUv;
+        uniform sampler2D texture;
+        void main() {
+            vec2 uv = vUv;
+            vec3 color = texture2D(texture, uv).rgb;
+            color.r = sin(color.g * 3.0);
+            color.g = sin(color.b * 3.0);
+            color.b = sin(color.r * 3.0);
+            gl_FragColor = vec4(color, 1.0);
+        }
+    </script>
+
+
+</body>
+</html>
+
